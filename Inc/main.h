@@ -50,10 +50,8 @@
 #define IR_Sensor_GPIO_Port GPIOA
 #define LS_TOP_Pin GPIO_PIN_7
 #define LS_TOP_GPIO_Port GPIOA
-#define LS_TOP_EXTI_IRQn EXTI9_5_IRQn
 #define LS_BUTTOM_Pin GPIO_PIN_0
 #define LS_BUTTOM_GPIO_Port GPIOB
-#define LS_BUTTOM_EXTI_IRQn EXTI0_IRQn
 #define RS485_SIGNAL_Pin GPIO_PIN_2
 #define RS485_SIGNAL_GPIO_Port GPIOB
 #define M1_Pin GPIO_PIN_3

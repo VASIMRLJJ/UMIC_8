@@ -55,6 +55,7 @@ UART_HandleTypeDef huart3;
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 enum Moving_State Updown;
+enum CoreXY_Action Updown_Act;
 enum Moving_State CoreXY_State;
 enum Moving_State Scissors_State;
 enum Circle_State Mcircle = Circle_Init;
@@ -128,7 +129,9 @@ int main(void)
   {
 		//HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
 		//HAL_Delay(200);
-		if(Updown != Moving)
+		if(Mcircle == Circle_Idle)
+			continue;
+		if(Updown != Moving && Updown_Act == Stop)
 		{
 			HAL_GPIO_WritePin(M1_GPIO_Port, M1_Pin, GPIO_PIN_SET);
 			HAL_GPIO_WritePin(M2_GPIO_Port, M2_Pin, GPIO_PIN_SET);
@@ -143,10 +146,27 @@ int main(void)
 				Moving_Updown(At_Top);
 			}
 		}
-		if(Mcircle == Circle_Moving)
+		else
 		{
-			Moving_Updown(At_Buttom);
+			if(HAL_GPIO_ReadPin(LS_BUTTOM_GPIO_Port, LS_BUTTOM_Pin) == GPIO_PIN_RESET
+				|| HAL_GPIO_ReadPin(LS_TOP_GPIO_Port, LS_TOP_Pin) == GPIO_PIN_RESET)
+			{
+				HAL_Delay(10);
+				if(HAL_GPIO_ReadPin(LS_BUTTOM_GPIO_Port, LS_BUTTOM_Pin) == GPIO_PIN_RESET && Updown_Act == Down)
+				{
+					Updown = At_Buttom;
+					Updown_Act = Stop;
+					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
+				}
+				if(HAL_GPIO_ReadPin(LS_TOP_GPIO_Port, LS_TOP_Pin) == GPIO_PIN_RESET && Updown_Act == Up)
+				{
+					Updown = At_Top;
+					Updown_Act = Stop;
+					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
+				}
+			}
 		}
+		
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
@@ -309,13 +329,13 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : LS_TOP_Pin */
   GPIO_InitStruct.Pin = LS_TOP_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(LS_TOP_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LS_BUTTOM_Pin */
   GPIO_InitStruct.Pin = LS_BUTTOM_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(LS_BUTTOM_GPIO_Port, &GPIO_InitStruct);
 
@@ -331,30 +351,34 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
-
 }
 
 /* USER CODE BEGIN 4 */
+/**
+  * @brief  USART recive interrupt callback function.
+  * @retval None
+  */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if(huart == &huart2)
 	{
 		switch(Mcircle)
 		{
-			case Circle_Idle: Mcircle = Circle_Moving;break;
-			default: HAL_UART_Transmit(&huart2, (uint8_t*)"BUSY", sizeof("BUSY"), 1000);
+			case Circle_Idle: 
+				Mcircle = Circle_Moving;
+				HAL_UART_Transmit(&huart2, (uint8_t*)"OK", sizeof("OK"), 1000);
+				Moving_Updown(At_Buttom);
+				break;
+			default: 
+				HAL_UART_Transmit(&huart2, (uint8_t*)"BUSY", sizeof("BUSY"), 1000);
 		}
 	}
 	if(huart == &huart1)
 	{
 		if(!memcmp(CoreXY_Recive_Buffer, "ok\n", sizeof("ok\n")))
 			CoreXY_State = Finished;
+		else
+			HAL_UART_Transmit(&huart2, (uint8_t*)"COREXY ERROR", sizeof("COREXY ERROR"), 1000);
 	}
 		if(huart == &huart3)
 	{
@@ -365,33 +389,40 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	}
 }
 
+/**
+  * @brief USART transmit interrupt callback function.
+  * @retval None
+  */
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if(huart == &huart1)
 	{
 		Block_Clear(CoreXY_Recive_Buffer);
-		CoreXY_State = Moving;
 		HAL_UART_Receive_IT(&huart1, CoreXY_Recive_Buffer, sizeof("ok\n"));
 	}
 	if(huart == &huart3)
 	{
 		HAL_GPIO_WritePin(RS485_SIGNAL_GPIO_Port, RS485_SIGNAL_Pin, GPIO_PIN_RESET);
 		Block_Clear(Scissors_Recive_Buffer);
-		Scissors_State = Moving;
 		HAL_UART_Receive_IT(&huart3, Scissors_Recive_Buffer, sizeof("DONE"));
 	}
 
 }
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+/*void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	if(GPIO_Pin == LS_BUTTOM_Pin)
 		Updown = At_Buttom;
 	else if(GPIO_Pin == LS_TOP_Pin)
 		Updown = At_Top;
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
-}
+}*/
 
+/**
+  * @brief To reset a block of memory into 0000...
+	* @param buffer: A pointer to a block of memory
+  * @retval None
+  */
 void Block_Clear(uint8_t* buffer)
 {
 	uint8_t i;
@@ -401,6 +432,11 @@ void Block_Clear(uint8_t* buffer)
 	}
 }
 
+/**
+  * @brief To set a COREXY action
+	* @param action: An action type in the CoreXY_Action enum
+  * @retval None
+  */
 void CoreXY_Act(uint8_t position, enum CoreXY_Action action)
 {
 	unsigned int xy[] = {0, 0};
@@ -422,18 +458,24 @@ void CoreXY_Act(uint8_t position, enum CoreXY_Action action)
 		uint16_t i;
 		Block_Clear(CoreXY_Transmit_Buffer);
 		i = sprintf((char*)CoreXY_Transmit_Buffer, "G01 X%d Y%d F150\n", xy[0] - DELTA_X, xy[1]);
-		HAL_UART_Transmit_IT(&huart1, CoreXY_Transmit_Buffer, i+1);
+		HAL_UART_Transmit(&huart1, CoreXY_Transmit_Buffer, i+1, 1000);
+		CoreXY_State = Moving;
+		HAL_UART_Transmit_IT(&huart1, (uint8_t*)"G4 P0.01", sizeof("G4 P0.01"));
 		while(CoreXY_State == Moving);
 		HAL_GPIO_WritePin(RS485_SIGNAL_GPIO_Port, RS485_SIGNAL_Pin, GPIO_PIN_SET);
 		HAL_UART_Transmit_IT(&huart3, (uint8_t*)"DOWN", sizeof("DOWN"));
+		Scissors_State = Moving;
 		while(Scissors_State == Moving);
 		
 		Block_Clear(CoreXY_Transmit_Buffer);
 		i = sprintf((char*)CoreXY_Transmit_Buffer, "G01 X%d Y%d F150\n", xy[0], xy[1]);
-		HAL_UART_Transmit_IT(&huart1, CoreXY_Transmit_Buffer, i+1);
+		HAL_UART_Transmit(&huart1, CoreXY_Transmit_Buffer, i+1, 1000);
+		CoreXY_State = Moving;
+		HAL_UART_Transmit_IT(&huart1, (uint8_t*)"G4 P0.01", sizeof("G4 P0.01"));
 		while(CoreXY_State == Moving);
 		HAL_GPIO_WritePin(RS485_SIGNAL_GPIO_Port, RS485_SIGNAL_Pin, GPIO_PIN_SET);
 		HAL_UART_Transmit_IT(&huart3, (uint8_t*)"UP", sizeof("UP"));
+		Scissors_State = Moving;
 		while(Scissors_State == Moving);
 	}
 	else
@@ -441,18 +483,24 @@ void CoreXY_Act(uint8_t position, enum CoreXY_Action action)
 		uint16_t i;
 		Block_Clear(CoreXY_Transmit_Buffer);
 		i = sprintf((char*)CoreXY_Transmit_Buffer, "G01 X%d Y%d F100\n", xy[0], xy[1]);
-		HAL_UART_Transmit_IT(&huart1, CoreXY_Transmit_Buffer, i+1);
+		HAL_UART_Transmit(&huart1, CoreXY_Transmit_Buffer, i+1, 1000);
+		CoreXY_State = Moving;
+		HAL_UART_Transmit_IT(&huart1, (uint8_t*)"G4 P0.01", sizeof("G4 P0.01"));
 		while(CoreXY_State == Moving);
 		HAL_GPIO_WritePin(RS485_SIGNAL_GPIO_Port, RS485_SIGNAL_Pin, GPIO_PIN_SET);
 		HAL_UART_Transmit_IT(&huart3, (uint8_t*)"DOWN", sizeof("DOWN"));
+		Scissors_State = Moving;
 		while(Scissors_State == Moving);
 		
 		Block_Clear(CoreXY_Transmit_Buffer);
 		i = sprintf((char*)CoreXY_Transmit_Buffer, "G01 X%d Y%d F150\n", xy[0] - DELTA_X, xy[1]);
-		HAL_UART_Transmit_IT(&huart1, CoreXY_Transmit_Buffer, i+1);
+		HAL_UART_Transmit(&huart1, CoreXY_Transmit_Buffer, i+1, 1000);
+		CoreXY_State = Moving;
+		HAL_UART_Transmit_IT(&huart1, (uint8_t*)"G4 P0.01", sizeof("G4 P0.01"));
 		while(CoreXY_State == Moving);
 		HAL_GPIO_WritePin(RS485_SIGNAL_GPIO_Port, RS485_SIGNAL_Pin, GPIO_PIN_SET);
 		HAL_UART_Transmit_IT(&huart3, (uint8_t*)"UP", sizeof("UP"));
+		Scissors_State = Moving;
 		while(Scissors_State == Moving);
 	}
 }
@@ -469,10 +517,12 @@ void CoreXY_Send(enum CoreXY_Command command)
 
 void Mechanic_Init(void)
 {
+	//CoreXY_Send(CoreXY_TogXY);
+	//CoreXY_Send(CoreXY_Home);
+	HAL_GPIO_WritePin(M1_GPIO_Port, M1_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(M2_GPIO_Port, M2_Pin, GPIO_PIN_RESET);
+	HAL_Delay(3000);
 	Moving_Updown(At_Top);
-	CoreXY_Send(CoreXY_TogXY);
-	CoreXY_Send(CoreXY_Home);
-	HAL_Delay(5000);
 	HAL_UART_Receive_IT(&huart2, Recive_Data, sizeof(Recive_Data));
 }
 
@@ -486,11 +536,13 @@ void Moving_Updown(enum Moving_State state)
 	{
 		HAL_GPIO_WritePin(M1_GPIO_Port, M1_Pin, GPIO_PIN_RESET);
 		HAL_GPIO_WritePin(M2_GPIO_Port, M2_Pin, GPIO_PIN_SET);
+		Updown_Act = Down;
 	}
 	else
 	{
 		HAL_GPIO_WritePin(M1_GPIO_Port, M1_Pin, GPIO_PIN_SET);
 		HAL_GPIO_WritePin(M2_GPIO_Port, M2_Pin, GPIO_PIN_RESET);
+		Updown_Act = Up;
 	}
 	Updown = Moving;
 }
@@ -501,7 +553,7 @@ void Moving_CoreXY(void)
 	put = Recive_Data[0]-'0';
 	get = Recive_Data[2]-'0';
 	Block_Clear(Recive_Data);
-	if((0<=put & put<=8)&(0<=get & get<=8))
+	if(put<=8&&get<=8)
 	{
 		CoreXY_Act(9, Up);
 		CoreXY_Act(put, Down);
@@ -509,7 +561,11 @@ void Moving_CoreXY(void)
 		CoreXY_Act(9, Down);
 	}
 	else
+	{
 		HAL_UART_Transmit(&huart2, (uint8_t*)"ILIGLE INPUT", sizeof("ILIGLE INPUT"), 1000);
+		HAL_UART_Transmit(&huart2, &put, 1, 1000);
+		HAL_UART_Transmit(&huart2, &get, 1, 1000);		
+	}
 }
 /* USER CODE END 4 */
 

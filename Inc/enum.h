@@ -25,6 +25,7 @@ enum CoreXY_Command
 enum CoreXY_Action
 {
 	Up,
-	Down
+	Down,
+	Stop
 };
 #endif
